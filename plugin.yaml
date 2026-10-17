@@ -1,0 +1,21 @@
+name: bambulab
+version: 1.0.0
+description: "Monitor and control Bambu Lab printers (H2S / X1 / P1 / A1) over local MQTT — multi-printer, live status, alerts, and a dashboard printer manager with masked access-code fields."
+author: "Dave"
+provides_tools:
+  - bambu_list
+  - bambu_status
+  - bambu_pause
+  - bambu_resume
+  - bambu_stop
+  - bambu_speed
+  - bambu_filament
+provides_hooks: []
+python_dependencies:
+  - "bambulabs-api>=2.6,<3"
+requires_hermes: ">=0.21"
+tags:
+  - 3d-printing
+  - bambu-lab
+  - mqtt
+  - home-automation

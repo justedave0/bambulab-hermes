@@ -1,0 +1,13 @@
+{
+  "name": "bambulab",
+  "label": "Bambu Lab",
+  "description": "Manage your Bambu Lab printers and check live status",
+  "icon": "Package",
+  "version": "1.0.0",
+  "tab": {
+    "path": "/bambulab",
+    "position": "end"
+  },
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}
