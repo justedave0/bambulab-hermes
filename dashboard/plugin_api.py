@@ -99,7 +99,7 @@ async def get_printers() -> dict[str, Any]:
     for p in _stored_printers():
         if not isinstance(p, dict):
             continue
-        slug = _slugify(p.get("slug") or p.get("ip") or "")
+        slug = _slugify(p.get("slug") or p.get("name") or p.get("ip") or "")
         out.append({
             "slug": slug,
             "name": str(p.get("name") or ""),
@@ -153,6 +153,33 @@ async def save_printers(body: PrintersIn) -> dict[str, Any]:
                 pass  # stale code left behind; harmless (unreferenced)
 
     return {"ok": True, "count": len(stored)}
+
+
+@router.post("/test/{slug}")
+async def test_printer(slug: str) -> dict[str, Any]:
+    """Connect to one printer with its stored code; report a snapshot on success,
+    the exact error on failure. Read-only — no control commands are sent."""
+    mod = _get_client()
+    try:
+        cfg = mod.require_printer(_slugify(slug))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=404, detail=str(exc))
+    if not cfg["has_code"]:
+        raise HTTPException(status_code=400, detail="no access code set for this printer — enter it in the masked field")
+    try:
+        info = await asyncio.wait_for(asyncio.to_thread(mod.printer_status, cfg), timeout=45)
+        return {
+            "ok": True,
+            "printer": cfg["slug"],
+            "state": info.get("gcode_state"),
+            "progress": info.get("progress"),
+            "nozzle": info.get("nozzle"),
+            "bed": info.get("bed"),
+            "file": info.get("file"),
+            "hms": info.get("hms"),
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "printer": cfg["slug"], "error": str(exc)[:300]}
 
 
 @router.get("/status")
