@@ -4,15 +4,19 @@
  * Plain IIFE — no build step. Uses window.__HERMES_PLUGIN_SDK__ globals
  * (React, components, hooks, fetchJSON) + window.__HERMES_PLUGINS__.register.
  *
- * Dynamic, unlimited "add printer" form. Each printer row: name / slug / ip /
- * serial inputs plus a MASKED access-code field (type="password").
- * The slug (id) is auto-derived from the NAME (H2S -> h2s); it can be typed
- * manually to override, but editing the name re-syncs it.
+ * Dynamic, unlimited "add printer" form. Each printer row: name / ip / serial
+ * plus a MASKED access-code field (type="password"). The printer's name is
+ * its id (auto-derived, e.g. "H2S" -> h2s); no id field is shown to the user.
  * Codes are never shown back from the backend (only a has_code flag);
  * a blank code on save keeps the existing one.
  *
  * Per-printer "Test" button: connects over MQTT with the stored code and
  * reports a live snapshot on success, or the exact error on failure.
+ *
+ * NOTE on button styling: the SDK Button default text color is near-black
+ * (text-primary-foreground) — on dark fills it is INVISIBLE (verified against
+ * the live dashboard's computed styles). Every non-primary button here sets an
+ * explicit light text color (text-foreground / text-destructive).
  */
 (function () {
   "use strict";
@@ -28,7 +32,7 @@
   var h = React.createElement;
 
   var BTN_BASE = "inline-flex items-center gap-2 px-4 py-2 text-sm font-medium transition-colors cursor-pointer";
-  var BTN_OUTLINE = BTN_BASE + " border border-border bg-background/40 hover:bg-foreground/10";
+  var BTN_OUTLINE = BTN_BASE + " border border-border bg-background/40 text-foreground hover:bg-foreground/10";
   var BTN_PRIMARY = BTN_BASE + " bg-primary text-primary-foreground hover:opacity-90";
   var BTN_DANGER = BTN_BASE + " border border-destructive/40 bg-transparent text-destructive hover:bg-destructive/10";
 
@@ -53,21 +57,20 @@
     return h(Card, { className: "border" },
       h(CardHeader, null,
         h("div", { className: "flex items-center justify-between" },
-          h(CardTitle, { className: "text-base" }, p.name || slugify(p.slug) || "New printer"),
+          h(CardTitle, { className: "text-base" }, p.name || "New printer"),
           h(Badge, { variant: p.has_code ? "default" : "outline" }, p.has_code ? "code set" : "no code")
         )
       ),
       h(CardContent, { className: "flex flex-col gap-4" },
-        h("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3" },
-          Field({ label: "Name (used as id)", value: p.name, placeholder: "H2S", onChange: function (v) { props.onChange(p.rowId, "name", v); } }),
-          Field({ label: "Slug (auto from name)", value: p.slug, placeholder: slugify(p.name) || "h2s", onChange: function (v) { props.onChange(p.rowId, "slug", v); } }),
-          Field({ label: "IP address", value: p.ip, placeholder: "192.168.0.45", onChange: function (v) { props.onChange(p.rowId, "ip", v); } }),
-          Field({ label: "Serial", value: p.serial, placeholder: "0938AC612200056", onChange: function (v) { props.onChange(p.rowId, "serial", v); } })
+        h("div", { className: "grid grid-cols-1 md:grid-cols-3 gap-3" },
+          Field({ label: "Name", value: p.name, placeholder: "e.g. H2S", onChange: function (v) { props.onChange(p.rowId, "name", v); } }),
+          Field({ label: "IP address", value: p.ip, placeholder: "e.g. 192.168.0.50", onChange: function (v) { props.onChange(p.rowId, "ip", v); } }),
+          Field({ label: "Serial number", value: p.serial, placeholder: "on the printer label or in its settings", onChange: function (v) { props.onChange(p.rowId, "serial", v); } })
         ),
         h("div", { className: "flex items-end gap-3" },
           h("div", { className: "flex-1" },
             Field({
-              label: "Access code (LAN / local mode) \u2014 leave blank to keep",
+              label: "Access code (LAN mode, shown on the printer) \u2014 leave blank to keep",
               value: "",
               type: "password",
               placeholder: p.has_code ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : "enter access code",
@@ -99,16 +102,17 @@
     var status = useState(null), setStatus = status[1];
     var msg = useState(""), setMsg = msg[1];
 
-    function rowKey(p) { return p.rowId || p.slug; }
+    function rowKey(p) { return p.rowId; }
 
     function load() {
       setLoading(true);
       SDK.fetchJSON("/api/plugins/bambulab/printers")
         .then(function (d) {
-          var rows = ((d && d.printers) || []).map(function (p) {
+          var rows = ((d && d.printers) || []).map(function (p, i) {
             var np = {};
             for (var k in p) { np[k] = p[k]; }
-            np.rowId = p.slug;
+            np.rowId = p.slug || ("loaded-" + i);
+            np.slug = slugify(p.name) || p.slug;
             return np;
           });
           setPrinters(rows);
@@ -153,9 +157,15 @@
     function save() {
       setSaving(true);
       setMsg("");
+      var payload = printers.map(function (p) {
+        var np = {};
+        for (var k in p) { if (k !== "rowId") { np[k] = p[k]; } }
+        np.slug = slugify(p.name) || p.slug;
+        return np;
+      });
       SDK.fetchJSON("/api/plugins/bambulab/printers", {
         method: "POST",
-        body: JSON.stringify({ printers: printers })
+        body: JSON.stringify({ printers: payload })
       })
         .then(function (d) { setMsg(d && d.ok ? "Saved \u2014 " + d.count + " printer(s)." : "Saved (details in server log)."); load(); })
         .catch(function (e) { setMsg("Save error: " + e); })
@@ -163,9 +173,9 @@
     }
 
     function testRow(p) {
-      var slug = slugify(p.slug || p.name);
+      var slug = slugify(p.name) || p.slug;
       if (!slug) {
-        patchRow(p.rowId, { test_ok: false, test_result: "\u2717 enter a name first (it becomes the id)" });
+        patchRow(p.rowId, { test_ok: false, test_result: "\u2717 give the printer a name first" });
         return;
       }
       patchRow(p.rowId, { testing: true, test_result: null, test_ok: null });
@@ -179,10 +189,10 @@
             if (d.file) bits.push("file " + d.file);
             patchRow(p.rowId, { test_ok: true, test_result: "\u2713 connected \u2014 configuration works" + (bits.length ? " (" + bits.join(", ") + ")" : "") });
           } else {
-            patchRow(p.rowId, { test_ok: false, test_result: "\u2717 " + ((d && d.error) || ((d && d.detail) || "unknown error") + " (press Save first if the printer is new)") });
+            patchRow(p.rowId, { test_ok: false, test_result: "\u2717 " + ((d && d.error) || (d && d.detail) || "unknown error") + " \u2014 press Save first if this printer is new" });
           }
         })
-        .catch(function (e) { patchRow(p.rowId, { test_ok: false, test_result: "\u2717 " + e + " (press Save first if the printer is new)" }); })
+        .catch(function (e) { patchRow(p.rowId, { test_ok: false, test_result: "\u2717 " + e + " \u2014 press Save first if this printer is new" }); })
         .finally(function () { patchRow(p.rowId, { testing: false }); });
     }
 
@@ -204,7 +214,7 @@
         ),
         h(CardContent, { className: "flex flex-col gap-4" },
           h("p", { className: "text-sm text-muted-foreground" },
-            "Add as many printers as you like. The name becomes the id (H2S \u2192 hermes bambu status h2s). Access codes are masked, stored securely in .env, never in config.yaml and never in the shared repo. Test connects to the printer with the saved code and reports back."),
+            "Add as many printers as you like. The access code is the one shown on the printer when LAN mode is enabled; it is masked here and stored securely on this machine \u2014 never shared. Use Test to check that a printer is reachable."),
           h("div", { className: "flex flex-col gap-4" },
             loading[0]
               ? h("p", { className: "text-sm text-muted-foreground" }, "Loading\u2026")
